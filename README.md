@@ -2,33 +2,25 @@
 
 ## Overview
 
-The MCP (Model Context Protocol) Agent TypeScript Port is a robust, type-safe implementation of the MCP Agent system. It provides a flexible framework for building intelligent, context-aware agents with advanced workflow management, logging, and execution capabilities.
+This is a TypeScript port of the [original MCP Agent framework by lastmile-ai](https://github.com/lastmile-ai/mcp-agent) - a simple, composable framework for building agents using the [Model Context Protocol](https://modelcontextprotocol.io/introduction).
 
-## Features
+## Motivation
 
-- 🚀 **Modular Architecture**
-  - Comprehensive TypeScript implementation
-  - Flexible, extensible design
-  - Type-safe interfaces
+The original MCP Agent was implemented in Python. This port aims to:
+- Provide a type-safe implementation
+- Leverage TypeScript's strong typing
+- Enable easier integration with TypeScript and JavaScript projects
+- Maintain the core principles of composable agent workflows
 
-- 📊 **Advanced Workflow Management**
-  - Step-based workflow execution
-  - Concurrent task processing
-  - Detailed context tracking
+## Features (Work in Progress)
 
-- 🔍 **Powerful Logging System**
-  - Configurable log levels
-  - Context-rich logging
-  - Log export capabilities
-
-- 🧰 **Flexible Executor**
-  - Task queuing
-  - Timeout handling
-  - Concurrent task management
-
-- 🖥️ **CLI Support**
-  - Command-line interface
-  - Easy agent management
+- TypeScript implementation of MCP Agent framework
+- Core workflow patterns:
+  - AugmentedLLM
+  - Parallel
+  - Logging
+  - Context Management
+  - Executor
 
 ## Installation
 
@@ -36,112 +28,32 @@ The MCP (Model Context Protocol) Agent TypeScript Port is a robust, type-safe im
 npm install @waldzell/mcp-agent-ts
 ```
 
-## Quick Start
-
-### Creating a Workflow
+## Usage
 
 ```typescript
-import { BaseWorkflow } from '@waldzell/mcp-agent-ts';
+import { Agent, AugmentedLLM } from '@waldzell/mcp-agent-ts';
 
-class MyDataProcessingWorkflow extends BaseWorkflow {
-  constructor() {
-    super('my-workflow', 'Data Processing');
-
-    this.addStep({
-      id: 'extract',
-      name: 'Data Extraction',
-      execute: async (context) => {
-        // Implement data extraction logic
-        return { data: ['item1', 'item2'] };
-      }
-    });
-
-    this.addStep({
-      id: 'transform',
-      name: 'Data Transformation',
-      execute: async (context) => {
-        // Implement data transformation logic
-        return { transformedData: ['ITEM1', 'ITEM2'] };
-      }
-    });
-  }
-}
-
-async function runWorkflow() {
-  const workflow = new MyDataProcessingWorkflow();
-  const results = await workflow.execute();
-  console.log(results);
-}
+// Example coming soon
 ```
 
-### Logging
+## Development Status
 
-```typescript
-import { debug, info, warn, error } from '@waldzell/mcp-agent-ts';
+🚧 **Early Stage Development** 🚧
 
-// Log with different levels
-debug('Debugging information', { userId: 123 });
-info('System started');
-warn('Potential issue detected');
-error('Critical error occurred');
-```
+This is an early-stage port and is not yet feature-complete. Contributions and feedback are welcome!
 
-### CLI Usage
+## Original Project
 
-```bash
-# Start the MCP Agent
-npx mcp-agent start
-
-# List available tools
-npx mcp-agent list-tools
-
-# Set log level
-npx mcp-agent log-level debug
-```
-
-## Executor Usage
-
-```typescript
-import { BaseExecutor, Task } from '@waldzell/mcp-agent-ts';
-
-const executor = new BaseExecutor({ 
-  maxConcurrentTasks: 3,
-  timeout: 60000 // 1-minute timeout
-});
-
-const task: Task = {
-  id: 'example-task',
-  name: 'Sample Task',
-  execute: async () => {
-    // Task implementation
-    return 'Task completed';
-  }
-};
-
-await executor.enqueueTask(task);
-```
-
-## Configuration
-
-The MCP Agent can be configured through:
-- Environment variables
-- Configuration files
-- Programmatic configuration
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Original MCP Agent: [lastmile-ai/mcp-agent](https://github.com/lastmile-ai/mcp-agent)
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+This project follows the license of the original MCP Agent project.
 
-## Contact
+## Contributing
 
-Waldzell AI - [Your Contact Information]
+Contributions are welcome! Please open issues or submit pull requests.
 
-Project Link: [https://github.com/your-repo/mcp-agent-ts](https://github.com/your-repo/mcp-agent-ts)
+## Acknowledgements
+
+Special thanks to the original MCP Agent developers for creating an innovative framework for AI agent development.
