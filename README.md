@@ -1,5 +1,7 @@
 # MCP Agent TypeScript Port
 
+[![smithery badge](https://smithery.ai/badge/@waldzellai/mcp-agent-ts)](https://smithery.ai/server/@waldzellai/mcp-agent-ts)
+
 ## Overview
 
 The MCP (Model Context Protocol) Agent TypeScript Port is a robust type-safe implementation of the MCP Agent system. It provides a flexible framework for building intelligent context-aware agents with advanced workflow management, logging, and execution capabilities.
@@ -33,6 +35,16 @@ This is a TypeScript port of the [original MCP Agent framework by lastmile-ai](h
   - Easy agent management
 
 ## Installation
+
+### Installing via Smithery
+
+To install MCP Agent TypeScript Port for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@waldzellai/mcp-agent-ts):
+
+```bash
+npx -y @smithery/cli install @waldzellai/mcp-agent-ts --client claude
+```
+
+### Manual Installation
 
 ```bash
 npm install @waldzell/mcp-agent-ts
