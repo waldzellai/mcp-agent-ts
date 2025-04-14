@@ -150,7 +150,7 @@ Original MCP Agent: [lastmile-ai/mcp-agent](https://github.com/lastmile-ai/mcp-a
 
 ## License
 
-This project follows the license of the original MCP Agent project.
+This project follows the license of the original MCP Agent project, found [here](https://github.com/lastmile-ai/mcp-agent/blob/main/LICENSE).
 
 ## Acknowledgements
 
