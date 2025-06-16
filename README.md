@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/waldzellai-mcp-agent-ts-badge.png)](https://mseep.ai/app/waldzellai-mcp-agent-ts)
+
 # MCP Agent TypeScript Port
 
 [![smithery badge](https://smithery.ai/badge/@waldzellai/mcp-agent-ts)](https://smithery.ai/server/@waldzellai/mcp-agent-ts)
