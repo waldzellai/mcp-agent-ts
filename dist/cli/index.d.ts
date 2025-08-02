@@ -1,11 +1,12 @@
+#!/usr/bin/env node
 export declare class McpAgentCli {
-    private server;
+    private mcpServer;
+    private localServer;
     private logger;
     constructor(serverName?: string);
-    initialize(): void;
-    private startServer;
     private listTools;
     private listResources;
-    private setLogLevel;
+    start(): Promise<void>;
+    initialize(): void;
 }
 export declare function runCli(): void;

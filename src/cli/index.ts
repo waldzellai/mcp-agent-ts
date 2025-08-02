@@ -49,7 +49,7 @@ export class McpAgentCli {
         params: {}
       });
 
-      return { tools: toolsResponse.result?.tools || {} };
+      return { tools: (toolsResponse.result as any)?.tools || {} };
     } catch (error) {
       this.logger.log(LogLevel.ERROR, 'Failed to list tools', { error });
       throw new McpError(ErrorCode.InternalError, 'Failed to list tools');
@@ -64,7 +64,7 @@ export class McpAgentCli {
         params: {}
       });
 
-      return { resources: resourcesResponse.result?.resources || {} };
+      return { resources: (resourcesResponse.result as any)?.resources || {} };
     } catch (error) {
       this.logger.log(LogLevel.ERROR, 'Failed to list resources', { error });
       throw new McpError(ErrorCode.InternalError, 'Failed to list resources');
