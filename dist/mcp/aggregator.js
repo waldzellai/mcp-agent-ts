@@ -7,6 +7,11 @@ exports.MCPAggregator = void 0;
 const contextDependent_1 = require("../core/contextDependent");
 const exceptions_1 = require("../core/exceptions");
 const connectionManager_1 = require("./connectionManager");
+const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
+const stdio_js_1 = require("@modelcontextprotocol/sdk/client/stdio.js");
+const websocket_js_1 = require("@modelcontextprotocol/sdk/client/websocket.js");
+const sse_js_1 = require("@modelcontextprotocol/sdk/client/sse.js");
+const exceptions_2 = require("../core/exceptions");
 const NAMESPACE_SEPARATOR = '_';
 /**
  * Aggregates multiple MCP servers and provides unified access to their capabilities
@@ -127,14 +132,21 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
         }
         this.logger.debug(`Calling tool '${name}' on server '${namespacedTool.server_name}'`);
         try {
-            // Get connection for the server
-            const connection = await this.getServerConnection(namespacedTool.server_name);
-            // Call the tool with the original name
-            const result = await connection.session.callTool({
-                name: namespacedTool.original_name,
-                arguments: args
+            if (this.connectionPersistence) {
+                const connection = await this.getServerConnection(namespacedTool.server_name);
+                const result = await connection.session.callTool({
+                    name: namespacedTool.original_name,
+                    arguments: args
+                });
+                return result;
+            }
+            // Ephemeral connection path
+            return await this.withEphemeralClient(namespacedTool.server_name, async (client) => {
+                return await client.callTool({
+                    name: namespacedTool.original_name,
+                    arguments: args
+                });
             });
-            return result;
         }
         catch (error) {
             this.logger.error(`Failed to call tool '${name}'`, error);
@@ -164,12 +176,20 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
         }
         this.logger.debug(`Getting prompt '${name}' from server '${namespacedPrompt.server_name}'`);
         try {
-            const connection = await this.getServerConnection(namespacedPrompt.server_name);
-            const result = await connection.session.getPrompt({
-                name: namespacedPrompt.original_name,
-                arguments: args
+            if (this.connectionPersistence) {
+                const connection = await this.getServerConnection(namespacedPrompt.server_name);
+                const result = await connection.session.getPrompt({
+                    name: namespacedPrompt.original_name,
+                    arguments: args
+                });
+                return result;
+            }
+            return await this.withEphemeralClient(namespacedPrompt.server_name, async (client) => {
+                return await client.getPrompt({
+                    name: namespacedPrompt.original_name,
+                    arguments: args
+                });
             });
-            return result;
         }
         catch (error) {
             this.logger.error(`Failed to get prompt '${name}'`, error);
@@ -200,11 +220,18 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
         }
         this.logger.debug(`Reading resource '${uri}' from server '${namespacedResource.server_name}'`);
         try {
-            const connection = await this.getServerConnection(namespacedResource.server_name);
-            const result = await connection.session.readResource({
-                uri: namespacedResource.original_uri
+            if (this.connectionPersistence) {
+                const connection = await this.getServerConnection(namespacedResource.server_name);
+                const result = await connection.session.readResource({
+                    uri: namespacedResource.original_uri
+                });
+                return result;
+            }
+            return await this.withEphemeralClient(namespacedResource.server_name, async (client) => {
+                return await client.readResource({
+                    uri: namespacedResource.original_uri
+                });
             });
-            return result;
         }
         catch (error) {
             this.logger.error(`Failed to read resource '${uri}'`, error);
@@ -224,16 +251,28 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
     async loadServerCapabilities(serverName) {
         this.logger.debug(`Loading capabilities from server '${serverName}'`);
         try {
-            const connection = await this.getServerConnection(serverName);
-            // Load tools
-            const toolsResult = await connection.session.listTools();
-            await this.updateToolMaps(serverName, toolsResult.tools);
-            // Load prompts
-            const promptsResult = await connection.session.listPrompts();
-            await this.updatePromptMaps(serverName, promptsResult.prompts);
-            // Load resources
-            const resourcesResult = await connection.session.listResources();
-            await this.updateResourceMaps(serverName, resourcesResult.resources);
+            if (this.connectionPersistence) {
+                const connection = await this.getServerConnection(serverName);
+                // Load tools
+                const toolsResult = await connection.session.listTools();
+                await this.updateToolMaps(serverName, toolsResult.tools);
+                // Load prompts
+                const promptsResult = await connection.session.listPrompts();
+                await this.updatePromptMaps(serverName, promptsResult.prompts);
+                // Load resources
+                const resourcesResult = await connection.session.listResources();
+                await this.updateResourceMaps(serverName, resourcesResult.resources);
+            }
+            else {
+                await this.withEphemeralClient(serverName, async (client) => {
+                    const toolsResult = await client.listTools();
+                    await this.updateToolMaps(serverName, toolsResult.tools);
+                    const promptsResult = await client.listPrompts();
+                    await this.updatePromptMaps(serverName, promptsResult.prompts);
+                    const resourcesResult = await client.listResources();
+                    await this.updateResourceMaps(serverName, resourcesResult.resources);
+                });
+            }
             this.logger.info(`Loaded capabilities from server '${serverName}'`);
         }
         catch (error) {
@@ -324,9 +363,8 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
             return await this.persistentConnectionManager.getConnection(serverName);
         }
         else {
-            // Create ephemeral connection
-            // This would be implemented in the connection manager
-            throw new Error('Ephemeral connections not yet implemented');
+            // For ephemeral mode, connections are handled ad-hoc in the calling methods
+            throw new Error('Ephemeral connections are handled inline; this path should not be called');
         }
     }
     /**
@@ -391,6 +429,76 @@ class MCPAggregator extends contextDependent_1.ContextDependentBase {
         }
         finally {
             // Release lock logic would go here if needed
+        }
+    }
+    /**
+     * Create an ephemeral MCP client for a server, run an operation, then clean up
+     */
+    async withEphemeralClient(serverName, fn) {
+        if (!this.context.server_registry) {
+            throw new Error('Server registry not initialized in context');
+        }
+        const registry = this.context.server_registry;
+        const config = registry.get(serverName);
+        if (!config) {
+            throw new exceptions_2.ConfigurationError(`Server '${serverName}' not found in registry`);
+        }
+        const client = new index_js_1.Client({
+            name: `mcp-agent-ephemeral-${serverName}`,
+            version: '1.0.0'
+        }, { capabilities: {} });
+        let transport;
+        try {
+            transport = await this.createTransport(config);
+            await client.connect(transport);
+            return await fn(client);
+        }
+        finally {
+            try {
+                await client.close();
+            }
+            catch { }
+            try {
+                if (transport && typeof transport.close === 'function') {
+                    await transport.close();
+                }
+            }
+            catch { }
+        }
+    }
+    /**
+     * Create a transport from a server config (duplicated from connection manager for now)
+     */
+    async createTransport(config) {
+        switch (config.transport) {
+            case 'stdio': {
+                if (!config.command) {
+                    throw new exceptions_2.ConfigurationError('Stdio transport requires command');
+                }
+                const env = { ...process.env };
+                if (config.env) {
+                    Object.assign(env, config.env);
+                }
+                return new stdio_js_1.StdioClientTransport({
+                    command: config.command,
+                    args: config.args,
+                    env
+                });
+            }
+            case 'websocket': {
+                if (!config.url) {
+                    throw new exceptions_2.ConfigurationError('WebSocket transport requires URL');
+                }
+                return new websocket_js_1.WebSocketClientTransport(new URL(config.url));
+            }
+            case 'http': {
+                if (!config.url) {
+                    throw new exceptions_2.ConfigurationError('HTTP transport requires URL');
+                }
+                return new sse_js_1.SSEClientTransport(new URL(config.url));
+            }
+            default:
+                throw new exceptions_2.ConfigurationError(`Unsupported transport: ${config.transport}`);
         }
     }
 }

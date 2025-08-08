@@ -112,4 +112,12 @@ export declare class MCPAggregator extends ContextDependentBase {
      * Simple async lock implementation
      */
     private withLock;
+    /**
+     * Create an ephemeral MCP client for a server, run an operation, then clean up
+     */
+    private withEphemeralClient;
+    /**
+     * Create a transport from a server config (duplicated from connection manager for now)
+     */
+    private createTransport;
 }

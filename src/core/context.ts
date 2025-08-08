@@ -4,6 +4,7 @@
 
 import { EventEmitter } from 'events';
 import { ConfigurationError } from './exceptions';
+import { BaseExecutor } from '../executor/index';
 
 // Type imports - these will be implemented in their respective modules
 export interface Logger {
@@ -139,9 +140,10 @@ export class Context extends EventEmitter {
                 // TODO: Initialize Temporal executor
                 this.logger.info('Temporal executor initialization not yet implemented');
             } else {
-                // Initialize AsyncIO executor by default
-                // TODO: Initialize AsyncIO executor
-                this.logger.info('AsyncIO executor initialization pending');
+                // Initialize default in-process executor
+                this.executor = new BasicExecutorAdapter(new BaseExecutor());
+                await this.executor.start();
+                this.logger.info('Default executor initialized');
             }
 
             // Initialize registries
@@ -237,4 +239,30 @@ export async function initializeContext(settings?: Settings): Promise<Context> {
 export async function cleanupContext(): Promise<void> {
     const context = Context.getInstance();
     await context.cleanup();
+}
+
+/**
+ * Adapter to bridge BaseExecutor to the Context.Executor interface
+ */
+class BasicExecutorAdapter implements Executor {
+    public readonly type: 'asyncio' = 'asyncio';
+    private readonly base: BaseExecutor;
+
+    constructor(base: BaseExecutor) {
+        this.base = base;
+    }
+
+    public async start(): Promise<void> {
+        // No-op for in-process executor
+    }
+
+    public async stop(): Promise<void> {
+        // Wait for running tasks to complete; no explicit shutdown needed
+        await this.base.waitForAllTasks();
+    }
+
+    public async execute<T>(task: () => Promise<T>): Promise<T> {
+        const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        return this.base.enqueueTask({ id, name: id, execute: task }) as Promise<T>;
+    }
 }
