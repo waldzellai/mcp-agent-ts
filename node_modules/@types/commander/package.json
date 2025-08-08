@@ -1,0 +1,12 @@
+{
+    "name": "@types/commander",
+    "version": "2.12.5",
+    "description": "Stub TypeScript definitions entry for commander, which provides its own types definitions",
+    "main": "",
+    "scripts": {},
+    "license": "MIT",
+    "dependencies": {
+        "commander": "*"
+    },
+    "deprecated": "This is a stub types definition. commander provides its own type definitions, so you do not need this installed."
+}

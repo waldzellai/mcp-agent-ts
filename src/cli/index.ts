@@ -127,6 +127,25 @@ export class McpAgentCli {
         }
       });
 
+    program
+      .command('log-level <level>')
+      .description('Set log level (debug|info|warn|error)')
+      .action((level: string) => {
+        const normalized = level.toLowerCase();
+        const valid: Record<string, LogLevel> = {
+          debug: LogLevel.DEBUG,
+          info: LogLevel.INFO,
+          warn: LogLevel.WARN,
+          error: LogLevel.ERROR,
+        };
+        if (!(normalized in valid)) {
+          console.error(`Invalid log level: ${level}. Use one of debug|info|warn|error.`);
+          process.exit(2);
+        }
+        this.logger.setLogLevel(valid[normalized]);
+        console.log(`Log level set to ${normalized}`);
+      });
+
     program.parse(process.argv);
   }
 }

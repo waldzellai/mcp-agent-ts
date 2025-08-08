@@ -8,6 +8,7 @@ exports.initializeContext = initializeContext;
 exports.cleanupContext = cleanupContext;
 const events_1 = require("events");
 const exceptions_1 = require("./exceptions");
+const index_1 = require("../executor/index");
 /**
  * Central context object containing all shared application state
  */
@@ -62,9 +63,10 @@ class Context extends events_1.EventEmitter {
                 this.logger.info('Temporal executor initialization not yet implemented');
             }
             else {
-                // Initialize AsyncIO executor by default
-                // TODO: Initialize AsyncIO executor
-                this.logger.info('AsyncIO executor initialization pending');
+                // Initialize default in-process executor
+                this.executor = new BasicExecutorAdapter(new index_1.BaseExecutor());
+                await this.executor.start();
+                this.logger.info('Default executor initialized');
             }
             // Initialize registries
             // These will be implemented as we port the respective modules
@@ -152,4 +154,25 @@ async function initializeContext(settings) {
 async function cleanupContext() {
     const context = Context.getInstance();
     await context.cleanup();
+}
+/**
+ * Adapter to bridge BaseExecutor to the Context.Executor interface
+ */
+class BasicExecutorAdapter {
+    type = 'asyncio';
+    base;
+    constructor(base) {
+        this.base = base;
+    }
+    async start() {
+        // No-op for in-process executor
+    }
+    async stop() {
+        // Wait for running tasks to complete; no explicit shutdown needed
+        await this.base.waitForAllTasks();
+    }
+    async execute(task) {
+        const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        return this.base.enqueueTask({ id, name: id, execute: task });
+    }
 }
