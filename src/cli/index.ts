@@ -5,6 +5,8 @@ import { createDefaultConfig } from '../config/index';
 import { Logger, LogLevel } from '../logging/index';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { registerTools } from '../tools/index';
+import { runDefaultEvaluation } from '../eval/index';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -22,6 +24,8 @@ export class McpAgentCli {
   constructor(serverName: string = 'default-mcp-agent') {
     const config = createDefaultConfig(serverName);
     this.localServer = new McpServer({ config });
+    // Register built-in tools
+    registerTools(this.localServer);
     this.logger = Logger.getInstance();
 
     this.mcpServer = new Server(
@@ -124,6 +128,18 @@ export class McpAgentCli {
           console.log('Available Resources:', JSON.stringify(resources, null, 2));
         } catch (error) {
           console.error('Error listing resources:', error);
+        }
+      });
+
+    program
+      .command('run-eval')
+      .description('Run evaluation benchmarks')
+      .action(async () => {
+        try {
+          const results = await runDefaultEvaluation();
+          console.log('Evaluation Results:', JSON.stringify(results, null, 2));
+        } catch (error) {
+          console.error('Error running evaluation:', error);
         }
       });
 

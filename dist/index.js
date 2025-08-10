@@ -30,5 +30,9 @@ __exportStar(require("./app"), exports);
 __exportStar(require("./types"), exports);
 // Utils
 __exportStar(require("./utils"), exports);
+// Tools
+__exportStar(require("./tools"), exports);
+// Evaluation
+__exportStar(require("./eval"), exports);
 // Version
 exports.VERSION = '0.1.0';

@@ -20,5 +20,11 @@ export * from './types';
 // Utils
 export * from './utils';
 
+// Tools
+export * from './tools';
+
+// Evaluation
+export * from './eval';
+
 // Version
 export const VERSION = '0.1.0';

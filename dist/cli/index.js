@@ -9,6 +9,8 @@ const index_1 = require("../config/index");
 const index_2 = require("../logging/index");
 const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
+const index_3 = require("../tools/index");
+const index_4 = require("../eval/index");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 class McpAgentCli {
     mcpServer;
@@ -17,6 +19,8 @@ class McpAgentCli {
     constructor(serverName = 'default-mcp-agent') {
         const config = (0, index_1.createDefaultConfig)(serverName);
         this.localServer = new mcpServer_1.McpServer({ config });
+        // Register built-in tools
+        (0, index_3.registerTools)(this.localServer);
         this.logger = index_2.Logger.getInstance();
         this.mcpServer = new index_js_1.Server({
             name: serverName,
@@ -108,6 +112,18 @@ class McpAgentCli {
             }
             catch (error) {
                 console.error('Error listing resources:', error);
+            }
+        });
+        commander_1.program
+            .command('run-eval')
+            .description('Run evaluation benchmarks')
+            .action(async () => {
+            try {
+                const results = await (0, index_4.runDefaultEvaluation)();
+                console.log('Evaluation Results:', JSON.stringify(results, null, 2));
+            }
+            catch (error) {
+                console.error('Error running evaluation:', error);
             }
         });
         commander_1.program
