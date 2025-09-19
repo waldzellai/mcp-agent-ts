@@ -3,12 +3,42 @@
  * Central context object to store global state shared across the application
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Context = void 0;
+exports.cleanupContextEffect = exports.initializeContextEffect = exports.Context = exports.ContextCleanupError = exports.ContextInitializationError = void 0;
 exports.initializeContext = initializeContext;
 exports.cleanupContext = cleanupContext;
 const events_1 = require("events");
+const effect_1 = require("effect");
 const exceptions_1 = require("./exceptions");
 const index_1 = require("../executor/index");
+class ContextInitializationError extends effect_1.Data.TaggedError('ContextInitializationError') {
+}
+exports.ContextInitializationError = ContextInitializationError;
+class ContextCleanupError extends effect_1.Data.TaggedError('ContextCleanupError') {
+}
+exports.ContextCleanupError = ContextCleanupError;
+const formatUnknown = (cause) => {
+    if (cause instanceof Error) {
+        return cause.message;
+    }
+    if (typeof cause === 'string') {
+        return cause;
+    }
+    try {
+        return JSON.stringify(cause);
+    }
+    catch {
+        return String(cause);
+    }
+};
+const toError = (cause, fallback) => {
+    if (cause instanceof Error) {
+        return cause;
+    }
+    const message = typeof cause === 'string' && cause.length > 0 ? cause : fallback;
+    const error = new Error(message);
+    error.cause = cause;
+    return error;
+};
 /**
  * Central context object containing all shared application state
  */
@@ -51,49 +81,78 @@ class Context extends events_1.EventEmitter {
     /**
      * Initialize the context with all required components
      */
-    async initialize() {
-        if (this.initialized) {
-            return;
-        }
-        this.logger.info('Initializing context...');
-        try {
-            // Initialize executor based on settings
-            if (this.settings.executor_type === 'temporal') {
-                // TODO: Initialize Temporal executor
-                this.logger.info('Temporal executor initialization not yet implemented');
+    initializeEffect() {
+        const self = this;
+        return (0, effect_1.pipe)(effect_1.Effect.gen(function* (_) {
+            if (self.initialized) {
+                return;
+            }
+            yield* effect_1.Effect.sync(() => self.logger.info('Initializing context...'));
+            if (self.settings.executor_type === 'temporal') {
+                yield* effect_1.Effect.sync(() => self.logger.info('Temporal executor initialization not yet implemented'));
             }
             else {
-                // Initialize default in-process executor
-                this.executor = new BasicExecutorAdapter(new index_1.BaseExecutor());
-                await this.executor.start();
-                this.logger.info('Default executor initialized');
+                self.executor = new BasicExecutorAdapter(new index_1.BaseExecutor());
+                yield* effect_1.Effect.tryPromise({
+                    try: () => self.executor.start(),
+                    catch: cause => new ContextInitializationError({ cause })
+                });
+                yield* effect_1.Effect.sync(() => self.logger.info('Default executor initialized'));
             }
-            // Initialize registries
-            // These will be implemented as we port the respective modules
-            this.initialized = true;
-            this.logger.info('Context initialized successfully');
-            this.emit('initialized');
+            self.initialized = true;
+            yield* effect_1.Effect.sync(() => {
+                self.logger.info('Context initialized successfully');
+                self.emit('initialized');
+            });
+        }), effect_1.Effect.tapError(cause => effect_1.Effect.sync(() => {
+            self.logger.error('Failed to initialize context', cause);
+        })), effect_1.Effect.mapError(cause => cause instanceof ContextInitializationError
+            ? cause
+            : new ContextInitializationError({ cause })));
+    }
+    async initialize() {
+        try {
+            await effect_1.Effect.runPromise(this.initializeEffect());
         }
         catch (error) {
-            this.logger.error('Failed to initialize context', error);
-            throw new exceptions_1.ConfigurationError(`Context initialization failed: ${error}`);
+            if (error instanceof ContextInitializationError) {
+                const configurationError = new exceptions_1.ConfigurationError(`Context initialization failed: ${formatUnknown(error.cause)}`);
+                configurationError.cause = error.cause;
+                throw configurationError;
+            }
+            throw error;
         }
     }
     /**
      * Clean up context resources
      */
-    async cleanup() {
-        this.logger.info('Cleaning up context...');
-        try {
-            if (this.executor) {
-                await this.executor.stop();
+    cleanupEffect() {
+        const self = this;
+        return (0, effect_1.pipe)(effect_1.Effect.gen(function* (_) {
+            yield* effect_1.Effect.sync(() => self.logger.info('Cleaning up context...'));
+            if (self.executor) {
+                yield* effect_1.Effect.tryPromise({
+                    try: () => self.executor.stop(),
+                    catch: cause => new ContextCleanupError({ cause })
+                });
             }
-            this.initialized = false;
-            this.emit('cleanup');
-            this.logger.info('Context cleanup completed');
+            self.initialized = false;
+            yield* effect_1.Effect.sync(() => {
+                self.emit('cleanup');
+                self.logger.info('Context cleanup completed');
+            });
+        }), effect_1.Effect.tapError(cause => effect_1.Effect.sync(() => {
+            self.logger.error('Error during context cleanup', cause);
+        })), effect_1.Effect.mapError(cause => cause instanceof ContextCleanupError ? cause : new ContextCleanupError({ cause })));
+    }
+    async cleanup() {
+        try {
+            await effect_1.Effect.runPromise(this.cleanupEffect());
         }
         catch (error) {
-            this.logger.error('Error during context cleanup', error);
+            if (error instanceof ContextCleanupError) {
+                throw toError(error.cause, 'Context cleanup failed');
+            }
             throw error;
         }
     }
@@ -143,17 +202,40 @@ exports.Context = Context;
 /**
  * Global context initialization helper
  */
-async function initializeContext(settings) {
+const initializeContextEffect = (settings) => effect_1.Effect.gen(function* (_) {
     const context = Context.getInstance(settings);
-    await context.initialize();
+    yield* context.initializeEffect();
     return context;
+});
+exports.initializeContextEffect = initializeContextEffect;
+async function initializeContext(settings) {
+    try {
+        return await effect_1.Effect.runPromise((0, exports.initializeContextEffect)(settings));
+    }
+    catch (error) {
+        if (error instanceof ContextInitializationError) {
+            const configurationError = new exceptions_1.ConfigurationError(`Context initialization failed: ${formatUnknown(error.cause)}`);
+            configurationError.cause = error.cause;
+            throw configurationError;
+        }
+        throw error;
+    }
 }
 /**
  * Global context cleanup helper
  */
+const cleanupContextEffect = () => Context.getInstance().cleanupEffect();
+exports.cleanupContextEffect = cleanupContextEffect;
 async function cleanupContext() {
-    const context = Context.getInstance();
-    await context.cleanup();
+    try {
+        await effect_1.Effect.runPromise((0, exports.cleanupContextEffect)());
+    }
+    catch (error) {
+        if (error instanceof ContextCleanupError) {
+            throw toError(error.cause, 'Context cleanup failed');
+        }
+        throw error;
+    }
 }
 /**
  * Adapter to bridge BaseExecutor to the Context.Executor interface

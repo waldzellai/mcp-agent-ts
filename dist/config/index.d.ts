@@ -1,3 +1,4 @@
+export * from './settings';
 export interface McpAgentConfig {
     serverName: string;
     version: string;
