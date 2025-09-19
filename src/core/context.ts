@@ -3,6 +3,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { Data, Effect, pipe } from 'effect';
 import { ConfigurationError } from './exceptions';
 import { BaseExecutor } from '../executor/index';
 
@@ -78,6 +79,41 @@ export interface TokenCounter {
     getTotal(): number;
 }
 
+export class ContextInitializationError extends Data.TaggedError('ContextInitializationError')<{
+    readonly cause: unknown;
+}> {}
+
+export class ContextCleanupError extends Data.TaggedError('ContextCleanupError')<{
+    readonly cause: unknown;
+}> {}
+
+const formatUnknown = (cause: unknown): string => {
+    if (cause instanceof Error) {
+        return cause.message;
+    }
+
+    if (typeof cause === 'string') {
+        return cause;
+    }
+
+    try {
+        return JSON.stringify(cause);
+    } catch {
+        return String(cause);
+    }
+};
+
+const toError = (cause: unknown, fallback: string): Error => {
+    if (cause instanceof Error) {
+        return cause;
+    }
+
+    const message = typeof cause === 'string' && cause.length > 0 ? cause : fallback;
+    const error = new Error(message);
+    (error as { cause?: unknown }).cause = cause;
+    return error;
+};
+
 /**
  * Central context object containing all shared application state
  */
@@ -127,53 +163,105 @@ export class Context extends EventEmitter {
     /**
      * Initialize the context with all required components
      */
+    public initializeEffect(): Effect.Effect<void, ContextInitializationError> {
+        const self = this;
+
+        return pipe(
+            Effect.gen(function*(_) {
+                if (self.initialized) {
+                    return;
+                }
+
+                yield* Effect.sync(() => self.logger.info('Initializing context...'));
+
+                if (self.settings.executor_type === 'temporal') {
+                    yield* Effect.sync(() =>
+                        self.logger.info('Temporal executor initialization not yet implemented')
+                    );
+                } else {
+                    self.executor = new BasicExecutorAdapter(new BaseExecutor());
+                    yield* Effect.tryPromise({
+                        try: () => self.executor!.start(),
+                        catch: cause => new ContextInitializationError({ cause })
+                    });
+                    yield* Effect.sync(() => self.logger.info('Default executor initialized'));
+                }
+
+                self.initialized = true;
+                yield* Effect.sync(() => {
+                    self.logger.info('Context initialized successfully');
+                    self.emit('initialized');
+                });
+            }),
+            Effect.tapError(cause =>
+                Effect.sync(() => {
+                    self.logger.error('Failed to initialize context', cause);
+                })
+            ),
+            Effect.mapError(cause =>
+                cause instanceof ContextInitializationError
+                    ? cause
+                    : new ContextInitializationError({ cause })
+            )
+        );
+    }
+
     public async initialize(): Promise<void> {
-        if (this.initialized) {
-            return;
-        }
-
-        this.logger.info('Initializing context...');
-
         try {
-            // Initialize executor based on settings
-            if (this.settings.executor_type === 'temporal') {
-                // TODO: Initialize Temporal executor
-                this.logger.info('Temporal executor initialization not yet implemented');
-            } else {
-                // Initialize default in-process executor
-                this.executor = new BasicExecutorAdapter(new BaseExecutor());
-                await this.executor.start();
-                this.logger.info('Default executor initialized');
-            }
-
-            // Initialize registries
-            // These will be implemented as we port the respective modules
-            
-            this.initialized = true;
-            this.logger.info('Context initialized successfully');
-            this.emit('initialized');
+            await Effect.runPromise(this.initializeEffect());
         } catch (error) {
-            this.logger.error('Failed to initialize context', error);
-            throw new ConfigurationError(`Context initialization failed: ${error}`);
+            if (error instanceof ContextInitializationError) {
+                const configurationError = new ConfigurationError(
+                    `Context initialization failed: ${formatUnknown(error.cause)}`
+                );
+                (configurationError as { cause?: unknown }).cause = error.cause;
+                throw configurationError;
+            }
+            throw error;
         }
     }
 
     /**
      * Clean up context resources
      */
+    public cleanupEffect(): Effect.Effect<void, ContextCleanupError> {
+        const self = this;
+
+        return pipe(
+            Effect.gen(function*(_) {
+                yield* Effect.sync(() => self.logger.info('Cleaning up context...'));
+
+                if (self.executor) {
+                    yield* Effect.tryPromise({
+                        try: () => self.executor!.stop(),
+                        catch: cause => new ContextCleanupError({ cause })
+                    });
+                }
+
+                self.initialized = false;
+                yield* Effect.sync(() => {
+                    self.emit('cleanup');
+                    self.logger.info('Context cleanup completed');
+                });
+            }),
+            Effect.tapError(cause =>
+                Effect.sync(() => {
+                    self.logger.error('Error during context cleanup', cause);
+                })
+            ),
+            Effect.mapError(cause =>
+                cause instanceof ContextCleanupError ? cause : new ContextCleanupError({ cause })
+            )
+        );
+    }
+
     public async cleanup(): Promise<void> {
-        this.logger.info('Cleaning up context...');
-
         try {
-            if (this.executor) {
-                await this.executor.stop();
-            }
-
-            this.initialized = false;
-            this.emit('cleanup');
-            this.logger.info('Context cleanup completed');
+            await Effect.runPromise(this.cleanupEffect());
         } catch (error) {
-            this.logger.error('Error during context cleanup', error);
+            if (error instanceof ContextCleanupError) {
+                throw toError(error.cause, 'Context cleanup failed');
+            }
             throw error;
         }
     }
@@ -227,18 +315,45 @@ export class Context extends EventEmitter {
 /**
  * Global context initialization helper
  */
+export const initializeContextEffect = (
+    settings?: Settings
+): Effect.Effect<Context, ContextInitializationError> =>
+    Effect.gen(function*(_) {
+        const context = Context.getInstance(settings);
+        yield* context.initializeEffect();
+        return context;
+    });
+
 export async function initializeContext(settings?: Settings): Promise<Context> {
-    const context = Context.getInstance(settings);
-    await context.initialize();
-    return context;
+    try {
+        return await Effect.runPromise(initializeContextEffect(settings));
+    } catch (error) {
+        if (error instanceof ContextInitializationError) {
+            const configurationError = new ConfigurationError(
+                `Context initialization failed: ${formatUnknown(error.cause)}`
+            );
+            (configurationError as { cause?: unknown }).cause = error.cause;
+            throw configurationError;
+        }
+        throw error;
+    }
 }
 
 /**
  * Global context cleanup helper
  */
+export const cleanupContextEffect = (): Effect.Effect<void, ContextCleanupError> =>
+    Context.getInstance().cleanupEffect();
+
 export async function cleanupContext(): Promise<void> {
-    const context = Context.getInstance();
-    await context.cleanup();
+    try {
+        await Effect.runPromise(cleanupContextEffect());
+    } catch (error) {
+        if (error instanceof ContextCleanupError) {
+            throw toError(error.cause, 'Context cleanup failed');
+        }
+        throw error;
+    }
 }
 
 /**

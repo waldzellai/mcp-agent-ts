@@ -2,6 +2,7 @@
  * Central context object to store global state shared across the application
  */
 import { EventEmitter } from 'events';
+import { Effect } from 'effect';
 export interface Logger {
     info(message: string, ...args: any[]): void;
     error(message: string, ...args: any[]): void;
@@ -63,6 +64,20 @@ export interface TokenCounter {
     reset(): void;
     getTotal(): number;
 }
+declare const ContextInitializationError_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => import("effect/Cause").YieldableError & {
+    readonly _tag: "ContextInitializationError";
+} & Readonly<A>;
+export declare class ContextInitializationError extends ContextInitializationError_base<{
+    readonly cause: unknown;
+}> {
+}
+declare const ContextCleanupError_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => import("effect/Cause").YieldableError & {
+    readonly _tag: "ContextCleanupError";
+} & Readonly<A>;
+export declare class ContextCleanupError extends ContextCleanupError_base<{
+    readonly cause: unknown;
+}> {
+}
 /**
  * Central context object containing all shared application state
  */
@@ -92,10 +107,12 @@ export declare class Context extends EventEmitter {
     /**
      * Initialize the context with all required components
      */
+    initializeEffect(): Effect.Effect<void, ContextInitializationError>;
     initialize(): Promise<void>;
     /**
      * Clean up context resources
      */
+    cleanupEffect(): Effect.Effect<void, ContextCleanupError>;
     cleanup(): Promise<void>;
     /**
      * Create a default console logger
@@ -113,8 +130,11 @@ export declare class Context extends EventEmitter {
 /**
  * Global context initialization helper
  */
+export declare const initializeContextEffect: (settings?: Settings) => Effect.Effect<Context, ContextInitializationError>;
 export declare function initializeContext(settings?: Settings): Promise<Context>;
 /**
  * Global context cleanup helper
  */
+export declare const cleanupContextEffect: () => Effect.Effect<void, ContextCleanupError>;
 export declare function cleanupContext(): Promise<void>;
+export {};

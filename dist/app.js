@@ -3,14 +3,36 @@
  * Main application class that manages global state and can host workflows
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MCPApp = void 0;
+exports.MCPApp = exports.WorkflowExecutionError = exports.WorkflowCreationError = exports.AppStopError = exports.AppInitializationError = void 0;
 exports.getDefaultApp = getDefaultApp;
 exports.workflow = workflow;
 exports.task = task;
 exports.signal = signal;
 const events_1 = require("events");
+const effect_1 = require("effect");
 const context_1 = require("./core/context");
 const serverRegistry_1 = require("./mcp/serverRegistry");
+class AppInitializationError extends effect_1.Data.TaggedError('AppInitializationError') {
+}
+exports.AppInitializationError = AppInitializationError;
+class AppStopError extends effect_1.Data.TaggedError('AppStopError') {
+}
+exports.AppStopError = AppStopError;
+class WorkflowCreationError extends effect_1.Data.TaggedError('WorkflowCreationError') {
+}
+exports.WorkflowCreationError = WorkflowCreationError;
+class WorkflowExecutionError extends effect_1.Data.TaggedError('WorkflowExecutionError') {
+}
+exports.WorkflowExecutionError = WorkflowExecutionError;
+const toError = (cause, fallback) => {
+    if (cause instanceof Error) {
+        return cause;
+    }
+    const message = typeof cause === 'string' && cause.length > 0 ? cause : fallback;
+    const error = new Error(message);
+    error.cause = cause;
+    return error;
+};
 /**
  * Main application class for MCP Agent
  */
@@ -36,85 +58,125 @@ class MCPApp extends events_1.EventEmitter {
     /**
      * Initialize the application
      */
+    initializeEffect() {
+        const self = this;
+        return (0, effect_1.pipe)(effect_1.Effect.gen(function* (_) {
+            if (self.initialized) {
+                return;
+            }
+            yield* effect_1.Effect.sync(() => console.log(`Initializing MCPApp '${self.name}'...`));
+            const context = yield* (0, effect_1.pipe)((0, context_1.initializeContextEffect)(self.settings), effect_1.Effect.mapError((cause) => new AppInitializationError({ cause })));
+            self.context = context;
+            yield* self.setupContextComponents();
+            yield* effect_1.Effect.sync(() => {
+                if (self.humanInputCallback) {
+                    context.human_input_callback = self.humanInputCallback;
+                }
+                if (self.elicitationCallback) {
+                    context.elicitation_callback = self.elicitationCallback;
+                }
+                context.app = self;
+            });
+            yield* self.processDecoratorMetadata();
+            self.initialized = true;
+            yield* effect_1.Effect.sync(() => {
+                self.emit('initialized');
+                console.log(`MCPApp '${self.name}' initialized successfully`);
+            });
+        }), effect_1.Effect.tapError(cause => effect_1.Effect.sync(() => {
+            console.error(`Failed to initialize MCPApp '${self.name}'`, cause);
+        })), effect_1.Effect.mapError((cause) => cause instanceof AppInitializationError
+            ? cause
+            : new AppInitializationError({ cause })));
+    }
     async initialize() {
         if (this.initialized) {
             return;
         }
-        console.log(`Initializing MCPApp '${this.name}'...`);
         try {
-            // Initialize context
-            this.context = await (0, context_1.initializeContext)(this.settings);
-            // Set up context components
-            this.setupContextComponents();
-            // Set callbacks
-            if (this.humanInputCallback) {
-                this.context.human_input_callback = this.humanInputCallback;
-            }
-            if (this.elicitationCallback) {
-                this.context.elicitation_callback = this.elicitationCallback;
-            }
-            // Store app reference in context
-            this.context.app = this;
-            // Process decorator metadata
-            await this.processDecoratorMetadata();
-            this.initialized = true;
-            this.emit('initialized');
-            console.log(`MCPApp '${this.name}' initialized successfully`);
+            await effect_1.Effect.runPromise(this.initializeEffect());
         }
         catch (error) {
-            console.error(`Failed to initialize MCPApp '${this.name}'`, error);
+            if (error instanceof AppInitializationError) {
+                throw toError(error.cause, `Failed to initialize MCPApp '${this.name}'`);
+            }
             throw error;
         }
     }
     /**
      * Start the application (context manager support)
      */
+    startEffect() {
+        const self = this;
+        return effect_1.Effect.gen(function* (_) {
+            if (self.running) {
+                return self;
+            }
+            yield* self.initializeEffect();
+            self.running = true;
+            yield* effect_1.Effect.sync(() => self.emit('started'));
+            return self;
+        });
+    }
     async start() {
-        if (this.running) {
-            return this;
+        try {
+            return await effect_1.Effect.runPromise(this.startEffect());
         }
-        await this.initialize();
-        this.running = true;
-        this.emit('started');
-        return this;
+        catch (error) {
+            if (error instanceof AppInitializationError) {
+                throw toError(error.cause, `Failed to start MCPApp '${this.name}'`);
+            }
+            throw error;
+        }
     }
     /**
      * Stop the application
      */
-    async stop() {
-        if (!this.running) {
-            return;
-        }
-        console.log(`Stopping MCPApp '${this.name}'...`);
-        try {
-            if (this.context) {
-                await (0, context_1.cleanupContext)();
+    stopEffect() {
+        const self = this;
+        return (0, effect_1.pipe)(effect_1.Effect.gen(function* (_) {
+            if (!self.running) {
+                return;
             }
-            this.running = false;
-            this.initialized = false;
-            this.emit('stopped');
-            console.log(`MCPApp '${this.name}' stopped successfully`);
+            yield* effect_1.Effect.sync(() => console.log(`Stopping MCPApp '${self.name}'...`));
+            if (self.context) {
+                yield* (0, effect_1.pipe)(self.context.cleanupEffect(), effect_1.Effect.catchAll((cause) => effect_1.Effect.fail(new AppStopError({ cause }))));
+            }
+            self.running = false;
+            self.initialized = false;
+            yield* effect_1.Effect.sync(() => {
+                self.emit('stopped');
+                console.log(`MCPApp '${self.name}' stopped successfully`);
+            });
+        }), effect_1.Effect.tapError(cause => effect_1.Effect.sync(() => console.error(`Error stopping MCPApp '${self.name}'`, cause))), effect_1.Effect.mapError((cause) => cause instanceof AppStopError ? cause : new AppStopError({ cause })));
+    }
+    async stop() {
+        try {
+            await effect_1.Effect.runPromise(this.stopEffect());
         }
         catch (error) {
-            console.error(`Error stopping MCPApp '${this.name}'`, error);
+            if (error instanceof AppStopError) {
+                throw toError(error.cause, `Error stopping MCPApp '${this.name}'`);
+            }
             throw error;
         }
     }
     /**
      * Run the application as a context manager
      */
-    async run() {
-        await this.start();
-        return new AppRunner(this);
+    runEffect() {
+        return (0, effect_1.pipe)(this.startEffect(), effect_1.Effect.map(() => new AppRunner(this)));
     }
-    /**
-     * Get the application context
-     */
-    getContext() {
-        if (!this.context) {
-            throw new Error('Application not initialized');
+    async run() {
+        try {
+            return await effect_1.Effect.runPromise(this.runEffect());
         }
-        return this.context;
+        catch (error) {
+            if (error instanceof AppInitializationError) {
+                throw toError(error.cause, `Failed to run MCPApp '${this.name}'`);
+            }
+            throw error;
+        }
     }
     /**
      * Register an MCP server
@@ -160,93 +222,126 @@ class MCPApp extends events_1.EventEmitter {
     /**
      * Create a workflow instance
      */
+    createWorkflowEffect(WorkflowClass, ...args) {
+        const self = this;
+        return effect_1.Effect.gen(function* (_) {
+            if (!self.context) {
+                return yield* effect_1.Effect.fail(new WorkflowCreationError({ cause: new Error('Application not initialized') }));
+            }
+            const workflow = yield* effect_1.Effect.try({
+                try: () => new WorkflowClass(self.context, ...args),
+                catch: cause => new WorkflowCreationError({ cause })
+            });
+            const metadata = self.decoratorMetadata.find(m => m.type === 'workflow' && m.target === WorkflowClass);
+            if (metadata && self.context.workflow_registry) {
+                self.context.workflow_registry.register(WorkflowClass.name, workflow);
+            }
+            return workflow;
+        });
+    }
     async createWorkflow(WorkflowClass, ...args) {
-        if (!this.context) {
-            throw new Error('Application not initialized');
+        try {
+            return await effect_1.Effect.runPromise(this.createWorkflowEffect(WorkflowClass, ...args));
         }
-        // Create workflow instance with context injection
-        const workflow = new WorkflowClass(this.context, ...args);
-        // Register if decorated
-        const metadata = this.decoratorMetadata.find(m => m.type === 'workflow' && m.target === WorkflowClass);
-        if (metadata && this.context.workflow_registry) {
-            this.context.workflow_registry.register(WorkflowClass.name, workflow);
+        catch (error) {
+            if (error instanceof WorkflowCreationError) {
+                throw toError(error.cause, `Failed to create workflow ${WorkflowClass.name}`);
+            }
+            throw error;
         }
-        return workflow;
     }
     /**
      * Execute a workflow
      */
+    executeWorkflowEffect(WorkflowClass, ...args) {
+        const self = this;
+        return effect_1.Effect.gen(function* (_) {
+            const workflow = yield* self.createWorkflowEffect(WorkflowClass, ...args);
+            if (typeof workflow.run !== 'function') {
+                yield* effect_1.Effect.fail(new WorkflowExecutionError({
+                    cause: new Error(`Workflow ${WorkflowClass.name} does not have a run method`)
+                }));
+            }
+            const result = yield* effect_1.Effect.tryPromise({
+                try: () => workflow.run(),
+                catch: cause => new WorkflowExecutionError({ cause })
+            });
+            return result;
+        });
+    }
     async executeWorkflow(WorkflowClass, ...args) {
-        const workflow = await this.createWorkflow(WorkflowClass, ...args);
-        if (typeof workflow.run === 'function') {
-            return await workflow.run();
+        try {
+            return await effect_1.Effect.runPromise(this.executeWorkflowEffect(WorkflowClass, ...args));
         }
-        else {
-            throw new Error(`Workflow ${WorkflowClass.name} does not have a run method`);
+        catch (error) {
+            if (error instanceof WorkflowCreationError || error instanceof WorkflowExecutionError) {
+                throw toError(error.cause, `Failed to execute workflow ${WorkflowClass.name}`);
+            }
+            throw error;
         }
     }
     /**
      * Set up context components
      */
     setupContextComponents() {
-        if (!this.context) {
-            return;
-        }
-        // Initialize registries
-        this.context.server_registry = new serverRegistry_1.MCPServerRegistry(this.context.logger);
-        // Initialize other registries (simplified for now)
-        this.context.activity_registry = {
-            register: (name, handler) => {
-                // Implementation would go here
-            },
-            get: (name) => undefined
-        };
-        this.context.signal_registry = {
-            register: (name, handler) => {
-                // Implementation would go here
-            },
-            get: (name) => undefined
-        };
-        this.context.workflow_registry = {
-            register: (name, workflow) => {
-                // Implementation would go here
-            },
-            get: (name) => undefined
-        };
-        this.context.decorator_registry = {
-            task: (fn) => fn,
-            workflow: (cls) => cls,
-            signal: (fn) => fn
-        };
+        return effect_1.Effect.sync(() => {
+            if (!this.context) {
+                return;
+            }
+            this.context.server_registry = new serverRegistry_1.MCPServerRegistry(this.context.logger);
+            this.context.activity_registry = {
+                register: (_name, _handler) => {
+                    // Implementation would go here
+                },
+                get: (_name) => undefined
+            };
+            this.context.signal_registry = {
+                register: (_name, _handler) => {
+                    // Implementation would go here
+                },
+                get: (_name) => undefined
+            };
+            this.context.workflow_registry = {
+                register: (_name, _workflow) => {
+                    // Implementation would go here
+                },
+                get: (_name) => undefined
+            };
+            this.context.decorator_registry = {
+                task: (fn) => fn,
+                workflow: (cls) => cls,
+                signal: (fn) => fn
+            };
+        });
     }
     /**
      * Process decorator metadata collected during class definition
      */
-    async processDecoratorMetadata() {
-        for (const metadata of this.decoratorMetadata) {
-            switch (metadata.type) {
-                case 'workflow':
-                    // Register workflow class
-                    if (this.context?.workflow_registry) {
-                        this.context.workflow_registry.register(metadata.target.name, metadata.target);
-                    }
-                    break;
-                case 'task':
-                    // Register task method
-                    if (this.context?.activity_registry && metadata.propertyKey) {
-                        const taskName = `${metadata.target.name}.${metadata.propertyKey}`;
-                        this.context.activity_registry.register(taskName, metadata.target.prototype[metadata.propertyKey]);
-                    }
-                    break;
-                case 'signal':
-                    // Register signal handler
-                    if (this.context?.signal_registry && metadata.propertyKey) {
-                        const signalName = `${metadata.target.name}.${metadata.propertyKey}`;
-                        this.context.signal_registry.register(signalName, metadata.target.prototype[metadata.propertyKey]);
-                    }
-                    break;
+    processDecoratorMetadata() {
+        const self = this;
+        return effect_1.Effect.sync(() => {
+            for (const metadata of self.decoratorMetadata) {
+                switch (metadata.type) {
+                    case 'workflow':
+                        if (self.context?.workflow_registry) {
+                            self.context.workflow_registry.register(metadata.target.name, metadata.target);
+                        }
+                        break;
+                    case 'task':
+                        if (self.context?.activity_registry && metadata.propertyKey) {
+                            const taskName = `${metadata.target.name}.${metadata.propertyKey}`;
+                            self.context.activity_registry.register(taskName, metadata.target.prototype[metadata.propertyKey]);
+                        }
+                        break;
+                    case 'signal':
+                        if (self.context?.signal_registry && metadata.propertyKey) {
+                            const signalName = `${metadata.target.name}.${metadata.propertyKey}`;
+                            self.context.signal_registry.register(signalName, metadata.target.prototype[metadata.propertyKey]);
+                        }
+                        break;
+                }
             }
-        }
+        });
     }
     /**
      * Update application settings
