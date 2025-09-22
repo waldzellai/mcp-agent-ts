@@ -1,0 +1,31 @@
+# Python MCP Server Feature Coverage vs. TypeScript Implementation
+
+## Architecture Snapshot
+- **Python (`mcp-agent`):** The Starlette-based `FastMCP` application wires an `MCPApp` into a long-lived `ServerContext`, provisions workflow registries (in-memory or Temporal), and exposes a large set of HTTP/MCP entry points for workflow orchestration, logging, and human-in-the-loop flows.
+- **TypeScript (`mcp-agent-ts`):** Our CLI spins up the low-level `Server` from `@modelcontextprotocol/sdk` and delegates list requests to a thin `McpServer` helper that only stores static capability maps.【F:src/cli/index.ts†L6-L87】【F:src/mcp/mcpServer.ts†L32-L109】 While we *can* build richer behavior on top of the SDK `Server`, none of the Python server's higher-level lifecycle management has been ported yet.
+
+## Feature Gap Inventory
+
+| Area | Python Implementation (high level) | Current TypeScript Status | Resulting Limitation |
+| --- | --- | --- | --- |
+| **App lifecycle & context** | `ServerContext` attaches an `MCPApp`, reuses workflow registries, and ensures the FastMCP instance is stateful across requests. | `ContextManager` only fabricates per-request metadata; `McpServer` does not persist app state or lifecycle hooks.【F:src/context/index.ts†L3-L38】【F:src/mcp/mcpServer.ts†L43-L84】 | No persistent workflow/app state, so every request acts on static capability snapshots.
+| **Workflow registry & tool surface** | Workflows registered on the app automatically expose `workflows-*` tools (list, run, status, resume, cancel, per-workflow helpers) with schema adaptation. | Only an `echo` demo tool is registered, and the MCP server does not expose any workflow-aware handlers.【F:src/tools/index.ts†L1-L37】【F:src/mcp/mcpServer.ts†L43-L84】 | Clients cannot discover or run workflows through MCP.
+| **Workflow execution & control plane** | HTTP routes and MCP tools can start runs, poll status, paginate run history, resume/cancel executions, and bridge to external executors (asyncio or Temporal). | `handleRequest` throws for every method other than `listTools`/`listResources`, so there is no run/resume/cancel surface at all.【F:src/mcp/mcpServer.ts†L50-L84】 | No remote workflow control, preventing parity with orchestrated jobs.
+| **Tool invocation plumbing** | Decorated Python tools are wrapped so synchronous and asynchronous workflows integrate with MCP request/response expectations. | Although tools are stored with handler references, nothing ever routes `call_tool` requests to them; the CLI only registers list handlers on the SDK server.【F:src/tools/index.ts†L13-L21】【F:src/cli/index.ts†L31-L87】 | Even simple tools cannot be invoked by MCP clients.
+| **Session bridging & upstream routing** | Run/session registries map Temporal or background workers back to the originating MCP session so logs, prompts, and notifications reach the right client connection. | No notion of upstream sessions—requests are handled inline and any background work would lose the client link entirely.【F:src/mcp/mcpServer.ts†L43-L95】 | Log streaming, notifications, and async callbacks cannot reach clients once control leaves the original request.
+| **Human-in-the-loop prompts** | Dedicated internal endpoints queue prompts, suspend workflows, and resume them when human answers arrive. | No prompt registry or resume mechanism exists; workflows cannot pause for human input. | Human approval/clarification flows are unsupported.
+| **Logging & telemetry forwarding** | The Python server attaches log streams to the MCP session, relays worker logs, and exposes `set_logging_level` through FastMCP. | Logging is purely local console output controlled by a singleton logger; no integration with MCP transports.【F:src/logging/index.ts†L3-L93】 | Clients cannot see workflow logs or adjust logging over MCP.
+| **Gateway metadata propagation** | Request headers and environment defaults are normalized into workflow memos so downstream workers know which gateway/token to call back with. | Requests are not inspected for gateway metadata, and no memo enrichment occurs. | Remote workers would lack the credentials/context needed to report back.
+| **Schema validation & tool adaptation** | Utilities ensure tool signatures produce valid JSON schemas before exposure, catching incompatibilities during registration. | Tool registration blindly stores whatever object is provided; there is no schema validation or signature adaptation. | Invalid tool definitions would fail at runtime with little feedback.
+| **Internal HTTP API surface** | Starlette routes handle status checks, notifications, prompt submission, streaming log drains, etc. | The CLI/server pair does not start any HTTP application—only stdio MCP transport is available.【F:src/cli/index.ts†L78-L165】 | External services cannot integrate through HTTP endpoints.
+
+## Additional Observations
+- The Python server's ability to swap between asyncio and Temporal registries (and to hand off long-running work to external workers) has no analogue in TypeScript; our `BaseWorkflow` abstraction runs everything inline and never exposes registry APIs.【F:src/workflows/baseWorkflow.ts†L1-L120】 Porting registry support will require new persistence layers and executor wiring.
+- Python's idempotency handling, run memoization, and prompt tracking rely on shared async locks and global maps—patterns absent from the TypeScript codebase today.
+- Because the CLI already instantiates the SDK `Server`, parity work should focus on enriching its handlers (or layering a richer server class) rather than replacing it. The existing `McpServer` helper can evolve or be bypassed once lifecycle, workflow, and routing features are ported.
+
+## Suggested Next Steps
+1. **Introduce a TypeScript `ServerContext` analogue** that retains app/workflow state, wires registries, and coordinates logging/session data around the SDK `Server` instance.
+2. **Port workflow tool generation and run control endpoints**, including schema validation and Temporal/asyncio registry adapters.
+3. **Implement session bridging and human-input queues** so background tasks can publish logs/prompts back to clients.
+4. **Audit gateway metadata requirements** and add memo enrichment plus idempotency tracking to match Python's behavior.
